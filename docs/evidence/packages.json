@@ -1,0 +1,42 @@
+{
+  "EnuoStudio_169Probe_v0.1.pmp": {
+    "archive_sha256": "e4bd5e573a69d1e0adcadbbf0a325ce541ff3c79d7b2b79cf998db219a378fcc",
+    "contents_sha256": "cf80ae9693ad25bca579e21924593d447179df4c82451ef1cc247a3479a7c197"
+  },
+  "EnuoStudio_169Probe_v0.2.pmp": {
+    "archive_sha256": "cd56fb2da3176ce60d8ee2f592e891b4e506d4a20afda7939aca3a986d28422b",
+    "contents_sha256": "0a8c341102ce86ba1e2670ba538c1a08c70e733f7140348218574648d9a5180d"
+  },
+  "EnuoStudio_169Probe_v0.3.pmp": {
+    "archive_sha256": "8705fbba19d0958ac0d14ba49bf877cd8796ec82ce76abf0282850d3c8ffacb9",
+    "contents_sha256": "12b9a95d18594a504f463ee4b8bcf4577eab7660b2f7a2e5acff5a712532bcd2"
+  },
+  "EnuoStudio_171Probe_v0.1.pmp": {
+    "archive_sha256": "b8b9b1995ab80e77eea9caf421bf70a0ed8b693473c95541a347eed326422ab3",
+    "contents_sha256": "1d9cb910d7bce94f83992e9a4ddb10e00cca9c416a107cc1e40b56284066cddf"
+  },
+  "EnuoStudio_171Probe_v0.2.pmp": {
+    "archive_sha256": "2a4c88dfb6613ace187de31b48d5aceb591968db6c24d0f4a0807ad386351f67",
+    "contents_sha256": "51a14528d456dd88d617caa63755c570340f8c1bcbfa3e6745e70fd9d3b01a82"
+  },
+  "EnuoStudio_FiveColor_v0.4.pmp": {
+    "archive_sha256": "2764e69d934772174f2105c7f713b17d979bf0bcfbef43fab5b13a925172c0be",
+    "contents_sha256": "bc91c2a88f8e718b0650d311d36173a4c3c8b0554e5e553a04f67a8fa553516f"
+  },
+  "EnuoStudio_NativeBW_v0.1.pmp": {
+    "archive_sha256": "202663b386be8014c27d303c44032dfcf2c6d02de02cfb2e02fbc37f94f9d92a",
+    "contents_sha256": "2a10f111edf99628e9377301e3bc2c58c40c5e3c564fc4e81151a590cb677f96"
+  },
+  "EnuoStudio_StageProbe_v0.2.pmp": {
+    "archive_sha256": "db3fdaa94499f24d5b018fc8dd72676c72c0cbd505c8661cd673b4acc09f2bd2",
+    "contents_sha256": "21b1f663cb2b4c0c2df0703ec46555c23a9772d3416b05b52f5079a12c803bf1"
+  },
+  "EnuoStudio_StageProbe_v0.3.pmp": {
+    "archive_sha256": "ce855c66a781d48acfbd2b209f351c91dde584ebc5025e9b63959a57c98052ba",
+    "contents_sha256": "295fce4e6bc58b3cc2cb8be53a654a138b8874841f496b721f267dde063fdef9"
+  },
+  "EnuoStudio_WhiteProbe_v0.1.pmp": {
+    "archive_sha256": "29651116090b094ae94fa1c47378f2a2abde1ac99fc2ddf5bdf2d7d38415f4b9",
+    "contents_sha256": "14d675ab0fb3f06c79f731cbf8553250c20398785f82c2d8c7293b04d135ff94"
+  }
+}

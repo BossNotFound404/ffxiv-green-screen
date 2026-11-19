@@ -1,0 +1,60 @@
+{
+  "layout": "bg/ex1/03_abr_a2/fld/a2fb/level/",
+  "weather_ids": [
+    44,
+    45,
+    46,
+    47,
+    48,
+    56
+  ],
+  "environment_ids": [
+    44,
+    45,
+    46,
+    47,
+    48,
+    56
+  ],
+  "active_groups": {
+    "44": [
+      "default"
+    ],
+    "45": [
+      "ultimate2",
+      "vfx01"
+    ],
+    "46": [
+      "ultimate",
+      "vfx02"
+    ],
+    "47": [
+      "ultimate",
+      "vfx03"
+    ],
+    "48": [
+      "ultimate",
+      "vfx04"
+    ],
+    "56": [
+      "ultimate",
+      "vfx05"
+    ]
+  },
+  "resource_sha256": {
+    "bg/ex1/03_abr_a2/fld/a2fb/level/a2fb.lvb": "d28137b89b4fafe87454ce907d01549f12aadbfcfc28ceb1330b4e19e6eb0dcd",
+    "bgcommon/env/global/ex1_genv/genv_abr_a2/genv_a2_fld/genv_a2fb.envb": "a356d02c79d2d7aa94242ef9d21bb714a66cfe16a241010ed66a7b760fa0168c",
+    "bg/ex1/03_abr_a2/fld/a2fb/level/bg.lgb": "b9077b2bc96f8b389392681ce8fa7f6231ca8fa5585e695792ddfbd6d6d3658c",
+    "bg/ex1/03_abr_a2/fld/a2fb/level/vfx.lgb": "9b26bb261ad631113100fa9c5ec4ad9275d71122d52dc7bffd577e44311fce63",
+    "bg/ex1/03_abr_a2/fld/a2fb/level/planmap.lgb": "2b83b6578b0dca888386d4702f3836d9a37d81e6341c814b39e8b65ac95aa122",
+    "bg/ex1/03_abr_a2/fld/a2fb/level/sound.lgb": "7297fc799f808778d01356c865939cd6dcbedbef296bec7485f1ead852fb57a2",
+    "bgcommon/env/obset/ex1_obset/obset_abr_a2/obset_a2_fld/obset_a2fb_default.obsb": "e18701ed711fe6d5fb70af8acd7ddbcd9daed8e8620ac33b8e0cca7fc37f65ec",
+    "bgcommon/env/obset/ex1_obset/obset_abr_a2/obset_a2_fld/obset_a2fb_ultimate.obsb": "a016eafa632fab7efd06542224cd5732dba36195c62047b076c13893b835568a",
+    "bgcommon/env/obset/ex1_obset/obset_abr_a2/obset_a2_fld/obset_a2fb_ultimate2.obsb": "a54c9ec933dbf09a178b5a74e51b6d8b17cdc27cdf83067ee1c1efebe59a83e1",
+    "bgcommon/env/obset/ex1_obset/obset_abr_a2/obset_a2_fld/obset_a2fb_vfx01.obsb": "da1228d779f0240e36afa3b6773cd18f4b1b11b0cbc880c44ca402989f38ecb1",
+    "bgcommon/env/obset/ex1_obset/obset_abr_a2/obset_a2_fld/obset_a2fb_vfx02.obsb": "21a137e87f9718ccd68c5410f29d0bce05a8866fe39fee4fa6e365f9aba75393",
+    "bgcommon/env/obset/ex1_obset/obset_abr_a2/obset_a2_fld/obset_a2fb_vfx03.obsb": "8612c8fed1ec976283ff915bcfe7ef1935ed0867a951cf429d723114773b2fb9",
+    "bgcommon/env/obset/ex1_obset/obset_abr_a2/obset_a2_fld/obset_a2fb_vfx04.obsb": "36f5207534d87a19cd2a384b4b90f92ac9a01568c44958d6c3600c9302a036de",
+    "bgcommon/env/obset/ex1_obset/obset_abr_a2/obset_a2_fld/obset_a2fb_vfx05.obsb": "279b7bb9f860a417474707519efb4e1341a65269bd166c17c733f06430f0a7c5"
+  }
+}
