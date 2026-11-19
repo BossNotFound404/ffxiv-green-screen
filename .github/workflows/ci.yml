@@ -27,8 +27,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-dotnet@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-dotnet@v6
         with:
           dotnet-version: 10.0.x
       - name: 进退棚与状态恢复（CaptureChecks）
@@ -43,8 +43,8 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-dotnet@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-dotnet@v6
         with:
           dotnet-version: 10.0.x
       - name: 取 Dalamud API 15 程序集
@@ -79,7 +79,7 @@ jobs:
         shell: pwsh
         run: powershell.exe -NoProfile -ExecutionPolicy Bypass -File ./tools/checks/Test-AlphaExport.ps1
       - name: 保存插件产物
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: RoundTableStudio
           if-no-files-found: error
