@@ -2,11 +2,15 @@
   "Author": "Local recording workflow",
   "Name": "Green Screen / 绿幕",
   "InternalName": "RoundTableStudio",
-  "AssemblyVersion": "0.8.1.0",
+  "AssemblyVersion": "0.9.0.0",
   "DalamudApiLevel": 15,
   "CanUnloadAsync": false,
   "ApplicableVersion": "any",
-  "Punchline": "在同一机位用五种背景录制特效。",
-  "Description": "在旅馆输入 /rtstudio，一键进入五色摄影棚。在普通视角拍一次角色技能，保存黑棚原帧和透明发光层。也可拍 VFXEditor 地面预览，用黑白棚还原透明图并与绿棚实拍对照。",
-  "Tags": ["VFX", "green screen", "studio"]
+  "Punchline": "在同一机位切换纯色背景，录制角色与特效。",
+  "Description": "在旅馆输入 /rtstudio 进入摄影棚，可切换黑、红、绿、蓝、白和中灰，拍摄角色技能或地面预览。安装配套 ReShade 扩展后，还可以录制蓝扇并整理为 After Effects 序列。",
+  "Tags": [
+    "VFX",
+    "green screen",
+    "studio"
+  ]
 }

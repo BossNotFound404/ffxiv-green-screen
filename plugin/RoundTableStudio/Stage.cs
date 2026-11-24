@@ -9,8 +9,9 @@ namespace RoundTableStudio;
 internal static unsafe class Stage
 {
     public const uint Territory = 448;
+    // Panel order. Weather and command selection use the ID paired with each name.
     public static readonly (string Name, byte Id)[] Colors =
-        [("黑", 47), ("红", 45), ("绿", 48), ("蓝", 56), ("白", 46)];
+        [("黑", 47), ("白", 46), ("中灰", 44), ("红", 45), ("绿", 48), ("蓝", 56)];
     private static readonly (byte Weather, uint Instance)[] Backdrops =
         [(47, 5837159), (45, 5837160), (48, 5837161), (56, 6051359)];
     public static readonly uint[] LegacyLamps =
@@ -92,9 +93,8 @@ internal static unsafe class Stage
             if (hosts[i] == null || hosts[i]->Layout != world->ActiveLayout) return;
             if (Backdrops[i].Weather == weather) selected = i;
         }
-        // White uses the weather-controlled stage model for both floor and sky.
-        // Its former VFX placement belongs to the same object set as the blue uplight.
-        if (selected < 0 && weather != 46) return;
+        // White and mid-gray use weather-controlled stage models for floor and sky.
+        if (selected < 0 && weather is not (44 or 46)) return;
         if (selected >= 0 && !hosts[selected]->IsActive) hosts[selected]->SetActive(true);
         for (int i = 0; i < Backdrops.Length; i++)
             if (i != selected && hosts[i]->IsActive) hosts[i]->SetActive(false);

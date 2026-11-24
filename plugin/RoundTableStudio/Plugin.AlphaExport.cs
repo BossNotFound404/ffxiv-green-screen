@@ -48,7 +48,7 @@ public sealed partial class Plugin
             throw new InvalidOperationException("请等进棚定位和首次切色完成。");
         if (targetModel.IsRedrawing)
             throw new InvalidOperationException("请等目标模型载入完成，再导出透明特效。");
-        if (Stage.Target() is not byte original || !Stage.Colors.Any(c => c.Id == original))
+        if (Stage.Target() is not byte original || !run.SupportsColor(original))
             throw new InvalidOperationException("请先选定一个摄影棚颜色。");
         var job = new ExportJob(run, original, viewport);
         export = job;

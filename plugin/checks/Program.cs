@@ -19,6 +19,33 @@ void Check(bool value, string scenario)
     Console.WriteLine("PASS " + scenario);
 }
 
+foreach (bool gradient in new[] { false, true })
+{
+    var newest = gradient ? StagePackage.Gradient : StagePackage.Stable;
+    var original = gradient ? StagePackage.LegacyGradient : StagePackage.LegacyStable;
+    foreach (var package in new[] { newest, original })
+        Check(package.MatchesHash(package.Hash) && package.MatchesHash(package.AlternateHash)
+            && !package.MatchesHash(new string('0', 64)), "only the two known archive variants are accepted for " + package.FileName);
+    Check(StagePackage.Select(gradient, [original.Name], f => f == newest.FileName) == newest,
+        "a bundled current package takes precedence over an installed legacy package");
+    Check(StagePackage.Select(gradient, [newest.Name], _ => false) == newest,
+        "an installed current package works without a copy beside the DLL");
+    Check(StagePackage.Select(gradient, [original.Name], _ => false) == original &&
+        StagePackage.Select(gradient, [], f => f == original.FileName) == original,
+        "both installed and bundled legacy packages are supported");
+}
+var legacyRun = JsonSerializer.Deserialize<Capture>("{}")!;
+Check(!legacyRun.SupportsColor(44) && legacyRun.SupportsColor(46), "old recording journals retain five-color mode");
+try { legacyRun.SetColor(47, 44, () => {}, (_, _) => true); throw new Exception("legacy pack accepted grey"); }
+catch (ArgumentOutOfRangeException) { }
+var grayRun = new Capture { SupportsMidGray = true };
+grayRun.SetColor(46, 44, () => {}, (old, next) => old == 46 && next == 44);
+var resumedGray = JsonSerializer.Deserialize<Capture>(JsonSerializer.Serialize(grayRun))!;
+Check(resumedGray.SupportsColor(44) && resumedGray.Last == 44, "mid-gray selection is persisted with package capability");
+bool restoredWhite = false;
+resumedGray.Restore(44, (old, next) => restoredWhite = old == 44 && next == 46);
+Check(restoredWhite && resumedGray.Last == null, "leave mid-gray and restore the original weather after recovery");
+
 Check(!run.CanShoot(448, 123) && !run.ShouldRelease(0, 123) && !run.ShouldRelease(177, 123),
     "waiting for local studio; loading screen is not a return");
 run.EntryRequestedAt = 1000;

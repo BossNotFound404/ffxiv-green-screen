@@ -7,5 +7,6 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="../RoundTableStudio/Capture.cs" Link="Capture.cs" />
+    <Compile Include="../RoundTableStudio/StagePackage.cs" Link="StagePackage.cs" />
   </ItemGroup>
 </Project>

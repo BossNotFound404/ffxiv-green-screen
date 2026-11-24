@@ -16,6 +16,7 @@ public sealed class Capture
 {
     public Guid Collection { get; set; }
     public string Mod { get; set; } = "";
+    public bool SupportsMidGray { get; set; }
     public uint Inn { get; set; }
     public ulong Character { get; set; }
     public long ProcessStart { get; set; }
@@ -52,6 +53,8 @@ public sealed class Capture
     public bool CanShoot(uint layout, ulong character) =>
         !Closing && SeenStudio && layout == 448 && Character != 0 && Character == character;
 
+    public bool SupportsColor(byte color) => color is 45 or 46 or 47 or 48 or 56 || color == 44 && SupportsMidGray;
+
     public bool AwaitingArrival(uint layout, long now) => !SeenStudio && EntryRequestedAt > 0
         && (layout == 0 || layout == Inn) && now - EntryRequestedAt is >= 0 and < 30000;
 
@@ -64,7 +67,7 @@ public sealed class Capture
 
     public void SetColor(byte target, byte color, Action persist, Func<byte, byte, bool> replace, bool refresh = false)
     {
-        if (color is not (45 or 46 or 47 or 48 or 56)) throw new ArgumentOutOfRangeException(nameof(color));
+        if (!SupportsColor(color)) throw new ArgumentOutOfRangeException(nameof(color));
         if (target == color && !refresh) return;
         var previous = (Original, Last);
         if (Last != target) Original = target;

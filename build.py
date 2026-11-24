@@ -9,12 +9,22 @@ import sys
 import tempfile
 
 
-# These are the two complete packages accepted by the studio plugin's importer.
+# Archived plugins and the six-color plugin verify the complete package bytes.
 STABLE_STAGE = "RoundTable_StableStage_v0.16.pmp"
 CAPTURE_STAGE = "RoundTable_CaptureStage_v0.17.pmp"
+GRAY_STABLE = "RoundTable_StableStage_v0.18.pmp"
+GRAY_CAPTURE = "RoundTable_CaptureStage_v0.19.pmp"
+# Both deflaters used by Windows CPython produce the same unpacked resources.
+# The second hash in each pair is the encoding used by the older archived DLLs.
 STUDIO_HASHES = {
-    STABLE_STAGE: "6556cbdc8cff5793aef80e900ce53a273b77ec5252fafd746d71066120388bfe",
-    CAPTURE_STAGE: "5824fe4a956ae8de59ddc3df65950686c4573e6ab3716c1d7c6f9351d452903b",
+    STABLE_STAGE: ("3933e64834b5610f60dcf16faa65033324c99b9ac92c5c68efeefe7843b40c96",
+                   "6556cbdc8cff5793aef80e900ce53a273b77ec5252fafd746d71066120388bfe"),
+    CAPTURE_STAGE: ("d5ccb529137d8e2490fceec01b0aec98bccc202ca08daa4f4589544699d701c2",
+                    "5824fe4a956ae8de59ddc3df65950686c4573e6ab3716c1d7c6f9351d452903b"),
+    GRAY_STABLE: ("8130631105fd92b96474d44e4f44bea0e90525bb501a50498b960079a0133340",
+                  "f2aae46b95b445cf6c1fc7688dd6b6248dd18787d16b6d2a41a2204d17ef3fb4"),
+    GRAY_CAPTURE: ("13248e955989957c3b6282fc561951eb444f038be59b3ae23b17a96e97ac3b0b",
+                   "24b47b21dbaac6dcffed0fce5648c103acbb50451fb7e87ce2f38ffddfd7054f"),
 }
 
 
@@ -30,6 +40,8 @@ def studio_steps():
         ("build_448_matched", "quiet.pmp", "matched.pmp"),
         ("build_448_stable", "matched.pmp", "quiet.pmp", STABLE_STAGE),
         ("build_448_capture", STABLE_STAGE, CAPTURE_STAGE),
+        ("build_448_gray", STABLE_STAGE, GRAY_STABLE),
+        ("build_448_gray", CAPTURE_STAGE, GRAY_CAPTURE),
     ]
 
 
@@ -37,7 +49,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--sqpack", default=os.environ.get("FFXIV_SQPACK"), help="Local FFXIV game/sqpack folder")
     mode = parser.add_mutually_exclusive_group()
-    mode.add_argument("--studio", action="store_true", help="Build the plugin's stable v0.16 and optional capture v0.17 stages")
+    mode.add_argument("--studio", action="store_true", help="Build the six-color and archived five-color studio packages")
     mode.add_argument("--all", action="store_true", help="Also build the archived 171, 169 and NativeBW experiments")
     parser.add_argument("--out", type=Path, help="New output folder (defaults to output/studio for --studio, otherwise output/packages)")
     args = parser.parse_args()
@@ -80,7 +92,7 @@ def main():
             packages = [root / name for name in STUDIO_HASHES]
             for package in packages:
                 digest = hashlib.sha256(package.read_bytes()).hexdigest()
-                if digest != STUDIO_HASHES[package.name]:
+                if digest not in STUDIO_HASHES[package.name]:
                     raise RuntimeError(f"{package.name} does not match the plugin's required SHA-256. Got {digest}.")
         else:
             packages = sorted((root / "output").glob("*/*.pmp"))

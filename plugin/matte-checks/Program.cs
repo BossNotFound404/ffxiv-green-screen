@@ -74,13 +74,15 @@ try
     var whiteOnly = StudioMatte.Export(root, 65, 1, darkField, whiteField, greenField, darkField, whiteField, default);
     Check(!whiteOnly.Passed && whiteOnly.Summary.Contains("在白棚明显") && whiteOnly.Summary.Contains("在黑棚和绿棚很淡"),
         "white-only color response is explained without guessing the material");
+    CheckWhiteVisibility(root);
     CheckSyntheticGlow(root);
     var emptySkill = StudioMatte.ExportBlackSkill(root, 1, 1, [0,0,0,0], 0, default);
     Check(!emptySkill.Passed && emptySkill.ForegroundPixels == 0 && File.Exists(Path.Combine(emptySkill.DirectoryPath, "black.png"))
         && !File.Exists(Path.Combine(emptySkill.DirectoryPath, "glow-add.png")), "blank skill exposure preserves only the actual image and report");
     if (args.Length == 2 && args[0] == "--reference-0.8.0") CheckRecordedSample(root, args[1], fireball: false);
     else if (args.Length == 2 && args[0] == "--fire-0.8.0") CheckRecordedSample(root, args[1], fireball: true);
-    else if (args.Length > 0) throw new ArgumentException("Usage: MatteChecks [--reference-0.8.0 or --fire-0.8.0 directory]");
+    else if (args.Length == 2 && args[0] == "--mixed-white-trap") CheckRecordedWhiteTrap(root, args[1]);
+    else if (args.Length > 0) throw new ArgumentException("Usage: MatteChecks [--reference-0.8.0 | --fire-0.8.0 | --mixed-white-trap directory]");
     int existing = Directory.GetDirectories(root).Length;
     try { StudioMatte.Export(root, width, height, [], white, green, dark, white, default); throw new Exception("invalid size accepted"); }
     catch (ArgumentException) { }
@@ -118,19 +120,84 @@ static void Check(bool ok, string name)
     if (!ok) throw new Exception("Failed: " + name);
 }
 
+static void CheckWhiteVisibility(string root)
+{
+    const int width = 101;
+    byte[] black = new byte[width * 4], green = new byte[width * 4];
+    byte[] white = Enumerable.Repeat((byte)255, width * 4).ToArray();
+    for (int x = 0; x < width; x++)
+    {
+        green[4*x+1] = 255;
+        if (x == 100) continue; // Empty common background.
+        black[4*x] = (byte)(x == 98 ? 8 : 130);
+        green[4*x] = (byte)(x == 99 ? 8 : 130);
+    }
+    for (int x = 95; x < 98; x++) white[4*x+2] = 254;
+    Verify(95, true);
+    white[4*94+2] = 254;
+    Verify(94, false);
+    foreach (var count in new[] { 63, 64 })
+    {
+        // Include the empty background pixel at the end of the shortened image.
+        var blackSlice = black[..((count + 1) * 4)];
+        var greenSlice = green[..((count + 1) * 4)];
+        var whiteSlice = white[..((count + 1) * 4)];
+        blackSlice[^4] = greenSlice[^4] = 0;
+        var sample = StudioMatte.Export(root, count + 1, 1, blackSlice, whiteSlice, greenSlice, blackSlice, whiteSlice, default);
+        Check(sample.Summary.Contains("白棚原图中是纯白") == (count >= 64), "minimum white visibility sample size");
+    }
+
+    void Verify(int exactPixels, bool expectedNotice)
+    {
+        var sample = StudioMatte.Export(root, width, 1, black, white, green, black, white, default);
+        using var report = JsonDocument.Parse(File.ReadAllText(Path.Combine(sample.DirectoryPath, "report.json")));
+        var data = report.RootElement;
+        Check(!sample.Passed && sample.ForegroundPixels == 100 &&
+            data.GetProperty("visibleOnBlackAndGreenPixels").GetInt32() == 98 &&
+            data.GetProperty("exactWhiteAtBlackAndGreenPixels").GetInt32() == exactPixels &&
+            data.GetProperty("mostlyPureWhiteAtForeground").GetBoolean() == expectedNotice &&
+            sample.Summary.Contains("白棚原图中是纯白") == expectedNotice,
+            "white visibility uses co-located pixels, exact white, strict 8/255 visibility and a 95% foreground threshold");
+        Check(ReadPng(Path.Combine(sample.DirectoryPath, "white.png"), 3)[3*95+2] == 254,
+            "near-white source pixel preserved in PNG");
+    }
+}
+
+static byte[] LoadRecordedRgba(string recording, string name)
+{
+    byte[] rgb = ReadPng(Path.Combine(recording, name + ".png"), 3);
+    Check(rgb.Length == 2560 * 1440 * 3, "recorded dimensions");
+    byte[] rgba = new byte[2560 * 1440 * 4];
+    for (int src = 0, dst = 0; src < rgb.Length; src += 3, dst += 4)
+        rgb.AsSpan(src, 3).CopyTo(rgba.AsSpan(dst, 3));
+    return rgba;
+}
+
+// Optional local regression. All seven source images are read-only.
+static void CheckRecordedWhiteTrap(string temporaryOutput, string recording)
+{
+    byte[] Load(string name) => LoadRecordedRgba(recording, name);
+    var result = StudioMatte.Export(temporaryOutput, 2560, 1440, Load("black"), Load("white"), Load("green"),
+        Load("black-repeat"), Load("white-repeat"), default, Load("black-hold"), Load("white-hold"),
+        "vfx/omen/eff/m0119_trap_01t.avfx");
+    using var report = JsonDocument.Parse(File.ReadAllText(Path.Combine(result.DirectoryPath, "report.json")));
+    var data = report.RootElement;
+    Check(!result.Passed && result.ForegroundPixels == 113128 && result.BlackWhiteMismatchPixels == 99769 &&
+        result.GreenMismatchPixels == 100280 && result.RepeatBlackMismatchPixels == 3541 &&
+        result.RepeatWhiteMismatchPixels == 47 && data.GetProperty("additive").GetProperty("file").ValueKind == JsonValueKind.Null,
+        "mixed trap retains the original review verdict, errors and additive decision");
+    Check(data.GetProperty("visibleOnBlackAndGreenPixels").GetInt32() == 111605 &&
+        data.GetProperty("exactWhiteAtBlackAndGreenPixels").GetInt32() == 109651 &&
+        data.GetProperty("mostlyPureWhiteAtForeground").GetBoolean() && result.Summary.Contains("白棚原图中是纯白"),
+        "mixed trap visibility matches independent counts from original images");
+    Console.WriteLine("PASS: actual trap has 109651 exact white pixels among 111605 positions visible on both black and green.");
+}
+
 // Optional read-only regression for the original 2560x1440 four-exposure session.
 // There was no fifth image in 0.8.0. Reuse white solely to exercise the original, recorded color statistics.
 static void CheckRecordedSample(string temporaryOutput, string recording, bool fireball)
 {
-    byte[] Load(string name)
-    {
-        byte[] rgb = ReadPng(Path.Combine(recording, name + ".png"), 3);
-        Check(rgb.Length == 2560 * 1440 * 3, "recorded dimensions");
-        byte[] rgba = new byte[2560 * 1440 * 4];
-        for (int src = 0, dst = 0; src < rgb.Length; src += 3, dst += 4)
-            rgb.AsSpan(src, 3).CopyTo(rgba.AsSpan(dst, 3));
-        return rgba;
-    }
+    byte[] Load(string name) => LoadRecordedRgba(recording, name);
     byte[] black = Load("black"), white = Load("white");
     var result = StudioMatte.Export(temporaryOutput, 2560, 1440, black, white, Load("green"), Load("black-repeat"), white, default);
     using var report = JsonDocument.Parse(File.ReadAllText(Path.Combine(result.DirectoryPath, "report.json")));

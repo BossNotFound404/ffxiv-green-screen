@@ -41,6 +41,7 @@ internal static class StudioMatte
         var reconstructed = new byte[bytes];
         long foreground = 0, blackWhiteErrors = 0, greenErrors = 0;
         long visibleBlack = 0, visibleWhite = 0, visibleGreen = 0, visibleRepeatBlack = 0, visibleRepeatWhite = 0;
+        long visibleOnBlackAndGreen = 0, exactWhiteAtBlackAndGreen = 0;
         long repeatBlackErrors = 0, repeatWhiteErrors = 0;
         long blackHoldErrors = 0, whiteHoldErrors = 0;
         int worstGreen = 0, worstRepeatBlack = 0, worstRepeatWhite = 0;
@@ -101,6 +102,11 @@ internal static class StudioMatte
             if (blackSignal > Tolerance) visibleBlack++;
             if (whiteSignal > Tolerance) visibleWhite++;
             if (greenSignal > Tolerance) visibleGreen++;
+            if (blackSignal > Tolerance && greenSignal > Tolerance)
+            {
+                visibleOnBlackAndGreen++;
+                if (whiteSignal == 0) exactWhiteAtBlackAndGreen++;
+            }
             if (repeatBlackSignal > Tolerance) visibleRepeatBlack++;
             if (repeatWhiteSignal > Tolerance) visibleRepeatWhite++;
             if (badPair) blackWhiteErrors++;
@@ -115,6 +121,8 @@ internal static class StudioMatte
         }
 
         bool hasBackground = foreground < (long)width * height;
+        // Only describe a dominant pattern. Compare the same coordinates in the first three source exposures.
+        bool mostlyPureWhite = exactWhiteAtBlackAndGreen >= 64 && exactWhiteAtBlackAndGreen * 20 >= foreground * 19;
         bool passed = foreground > 0 && hasBackground && blackWhiteErrors == 0 && greenErrors == 0
             && repeatBlackErrors == 0 && repeatWhiteErrors == 0 && blackHoldErrors == 0 && whiteHoldErrors == 0;
         string summary = foreground == 0 ? "各张截图中都未检出明显前景，本次只保存诊断。"
@@ -135,6 +143,8 @@ internal static class StudioMatte
                 summary += " 特效在白棚明显，在黑棚和绿棚很淡，本次透明还原未通过。";
             summary += $" 黑、白、绿棚分别检出 {visibleBlack:N0}、{visibleWhite:N0}、{visibleGreen:N0} 个可见像素。";
         }
+        if (mostlyPureWhite)
+            summary += $" 黑棚和绿棚都有纹样的位置中，有 {exactWhiteAtBlackAndGreen:N0} 个像素在白棚原图中是纯白；这些位置在白底上没有可辨的色差。";
         var additive = !passed && foreground > 0 && hasBackground
             ? CheckAdditive(blackRgba, whiteRgba, greenRgba, foreground, greenErrors,
                 visibleBlack > 0 && visibleGreen > 0 && visibleWhite == 0, cancellation)
@@ -162,6 +172,9 @@ internal static class StudioMatte
                 passed, width, height, effectPath, foregroundPixels = foreground, commonBackgroundPixels = (long)width * height - foreground,
                 blackWhiteMismatchPixels = blackWhiteErrors, greenMismatchPixels = greenErrors,
                 blackVisiblePixels = visibleBlack, whiteVisiblePixels = visibleWhite, greenVisiblePixels = visibleGreen,
+                visibleOnBlackAndGreenPixels = visibleOnBlackAndGreen,
+                exactWhiteAtBlackAndGreenPixels = exactWhiteAtBlackAndGreen,
+                mostlyPureWhiteAtForeground = mostlyPureWhite,
                 repeatBlackVisiblePixels = visibleRepeatBlack, repeatWhiteVisiblePixels = visibleRepeatWhite,
                 repeatBlackMismatchPixels = repeatBlackErrors, worstRepeatBlackChannelError = worstRepeatBlack,
                 repeatWhiteMismatchPixels = repeatWhiteErrors, worstRepeatWhiteChannelError = worstRepeatWhite,

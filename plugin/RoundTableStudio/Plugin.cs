@@ -126,7 +126,7 @@ public sealed partial class Plugin : IDalamudPlugin
             status = "正在恢复上次录制。如果仍在棚内，将尝试返回原旅馆。";
         }
         commands.AddHandler("/rtstudio", new CommandInfo((_, argument) => StudioCommand(argument.Trim()))
-            { HelpMessage = "打开 Green Screen / 绿幕。可加 进棚、退棚 或 黑、红、绿、蓝、白。" });
+            { HelpMessage = "打开 Green Screen / 绿幕。可加 进棚、退棚 或 黑、红、绿、蓝、白、中灰。" });
         pi.UiBuilder.Draw += Draw;
         pi.UiBuilder.OpenMainUi += Show;
         framework.Update += Tick;
@@ -210,11 +210,12 @@ public sealed partial class Plugin : IDalamudPlugin
         Prepare(request.Inn, request.Character, installed.Value);
     }
 
-    private void Prepare(uint inn, ulong character, (Guid, string, string) installed)
+    private void Prepare(uint inn, ulong character, (Guid, string, bool) installed)
     {
-        var (collection, mod, _) = installed;
+        var (collection, mod, supportsMidGray) = installed;
         shelf.CheckAvailable(collection, mod);
-        config.Pending = new Capture { Collection = collection, Mod = mod, Inn = inn, Character = character, ProcessStart = ProcessStart };
+        config.Pending = new Capture { Collection = collection, Mod = mod, SupportsMidGray = supportsMidGray,
+            Inn = inn, Character = character, ProcessStart = ProcessStart };
         verified = false;
         applyFirstColor = true;
         exportNotice = "";
@@ -239,7 +240,7 @@ public sealed partial class Plugin : IDalamudPlugin
 
     private void VerifyResources(Capture run)
     {
-        try { shelf.Verify(run.Mod); }
+        try { shelf.Verify(run.Mod, run.SupportsMidGray); }
         catch (Exception) when (Environment.TickCount64 < verifyUntil) { return; }
         catch
         {
@@ -457,6 +458,7 @@ public sealed partial class Plugin : IDalamudPlugin
             if (ReferenceEquals(exiting, config.Pending)) Act(() => End(exiting));
         }
         TickExport();
+        PollFanSequence();
         if (export?.SceneReleased != false && exportOpacity.Active) exportOpacity.Observe(Character);
         if (switchRequested is bool switching && Environment.TickCount64 >= switchDeadline)
             SwitchFailed(switching, new InvalidOperationException("Hyperborea 开关操作超时。"));
@@ -515,7 +517,7 @@ public sealed partial class Plugin : IDalamudPlugin
             }
             if (!run.SeenStudio && layout == Stage.Territory && character == run.Character)
             {
-                shelf.Verify(run.Mod);
+                shelf.Verify(run.Mod, run.SupportsMidGray);
                 run.SeenStudio = true;
                 journey = Journey.Ready;
                 positionOnEntry = config.UseSpawn;
@@ -543,8 +545,8 @@ public sealed partial class Plugin : IDalamudPlugin
         if (applyFirstColor && Stage.Target().HasValue && Stage.Fade().HasValue)
         {
             applyFirstColor = false;
-            var color = Stage.Colors.Any(c => c.Id == config.LastColor) ? config.LastColor : (byte)47;
-            Act(() => Color(run, color));
+            var color = run.SupportsColor(config.LastColor) ? config.LastColor : (byte)47;
+            Act(() => Color(run, color, temporary: config.LastColor == 44 && !run.SupportsMidGray));
         }
         if (resumeExtendedRange && shownCamera.HasValue && shownFreecam != true)
         {
@@ -609,6 +611,8 @@ public sealed partial class Plugin : IDalamudPlugin
     private void Color(Capture run, byte color, bool temporary = false)
     {
         RequireStudio(run);
+        if (!run.SupportsColor(color))
+            throw new InvalidOperationException("当前棚包不支持该颜色。中灰棚需要 v0.18 稳定棚包或 v0.19 渐变棚包。");
         if (!temporary && export is { SceneReleased: false })
             throw new InvalidOperationException("透明导出正在换棚，请先取消拍摄。");
         applyFirstColor = false;
@@ -867,13 +871,16 @@ public sealed partial class Plugin : IDalamudPlugin
                 ImGui.BeginDisabled(!ready || export is { SceneReleased: false });
                 foreach (var (label, id) in Stage.Colors)
                 {
+                    if (!run.SupportsColor(id)) continue;
                     if (id != Stage.Colors[0].Id) ImGui.SameLine();
                     if (ImGui.RadioButton(label, selectedColor == id)) FromPanel(() => Color(run, id));
                 }
                 ImGui.EndDisabled();
                 if (ready)
                 {
+                    ImGui.BeginDisabled(FanSequenceBusy);
                     DrawExport(run);
+                    ImGui.EndDisabled();
                     ImGui.BeginDisabled(export is { SceneReleased: false });
                     DrawShot(run);
                     ImGui.EndDisabled();
@@ -892,6 +899,7 @@ public sealed partial class Plugin : IDalamudPlugin
                 if (ImGui.Button(journey == Journey.RestoreHelp ? "重试还原" : run.Closing ? "重试退棚" : run.SeenStudio ? "退棚" : "取消进棚")) FromPanel(() => End(run));
                 ImGui.EndDisabled();
             }
+            DrawFanSequence();
             ImGui.PopTextWrapPos();
         }
         ImGui.End();
@@ -901,6 +909,7 @@ public sealed partial class Plugin : IDalamudPlugin
     {
         if (disposed) return;
         disposed = true;
+        DisposeFanSequence();
         framework.Update -= Tick;
         pi.UiBuilder.Draw -= Draw;
         pi.UiBuilder.OpenMainUi -= Show;

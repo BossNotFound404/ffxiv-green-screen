@@ -1,20 +1,12 @@
 namespace RoundTableStudio
 {
-    internal sealed class Capture
-    {
-        internal bool Closing { get; set; }
-        internal ulong Character => 5;
-        internal bool CanShoot(uint layout, ulong actor) => layout == 448 && actor == Character;
-    }
-
     internal static class Stage
     {
-        internal static (byte Id, string Name)[] Colors => [(45,"red"),(46,"white"),(47,"black"),(48,"green"),(56,"blue")];
         internal static byte Color;
         internal static byte? Target() => Color;
     }
 
-    internal sealed class TestConfig { internal Capture Pending { get; } = new(); }
+    internal sealed class TestConfig { internal Capture Pending { get; } = new() { Character = 5, SeenStudio = true }; }
     internal sealed class TestUi { internal bool DisableUserUiHide { get; set; } }
     internal sealed class TestClient { internal bool IsGPosing { get; set; } }
     internal sealed class TestModel { internal bool IsRedrawing { get; set; } }

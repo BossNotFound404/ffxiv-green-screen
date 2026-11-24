@@ -10,12 +10,16 @@
 python build.py --studio --sqpack "D:\Games\FFXIV\game\sqpack"
 ```
 
-构建会检查两份完整文件的 SHA-256，通过后写入 `output/studio/`。已有同名输出时，请用 `--out output/studio-2` 指定新目录。游戏数据更新导致哈希不符时，记录客户端版本和第一条错误，供维护者核对。
+程序从自己的游戏数据生成四个棚包，检查每个成品的 SHA-256，通过后一起写入 `output/studio/`。日常使用只需把所选的稳定棚放在 `RoundTableStudio.dll` 旁。已有同名输出时，用 `--out output/studio-2` 指向新目录。若游戏数据更新导致校验失败，反馈时请写明客户端版本与第一条错误。
 
-| 文件 | 用途 | 已适配的 SHA-256 |
+| 棚包 | 适用场景 | 本次从国服客户端生成的 SHA-256 |
 |---|---|---|
-| `RoundTable_StableStage_v0.16.pmp` | 稳定棚。放在插件 DLL 旁，首次进棚时自动导入。 | `6556cbdc8cff5793aef80e900ce53a273b77ec5252fafd746d71066120388bfe` |
-| `RoundTable_CaptureStage_v0.17.pmp` | 可选。试用天幕渐变修正时放在同一目录。 | `5824fe4a956ae8de59ddc3df65950686c4573e6ab3716c1d7c6f9351d452903b` |
+| `RoundTable_StableStage_v0.18.pmp` | 默认六色棚，含中灰 | `f2aae46b95b445cf6c1fc7688dd6b6248dd18787d16b6d2a41a2204d17ef3fb4` |
+| `RoundTable_CaptureStage_v0.19.pmp` | 六色棚，可选的天幕渐变修正 | `24b47b21dbaac6dcffed0fce5648c103acbb50451fb7e87ce2f38ffddfd7054f` |
+| `RoundTable_StableStage_v0.16.pmp` | 旧版五色稳定棚 | `6556cbdc8cff5793aef80e900ce53a273b77ec5252fafd746d71066120388bfe` |
+| `RoundTable_CaptureStage_v0.17.pmp` | 旧版五色渐变试验棚 | `5824fe4a956ae8de59ddc3df65950686c4573e6ab3716c1d7c6f9351d452903b` |
+
+这里列的是用 Windows Python 3.14.7 得到的整包校验值。另一种已核对的 ZIP 压缩结果有相同的包内文件，构建脚本和预览版插件也接受相应的整包校验值。[构建脚本](../build.py) · [插件认可的四组校验值](../plugin/RoundTableStudio/StagePackage.cs)
 
 ## 编译插件
 
@@ -39,15 +43,20 @@ python build.py --studio --out output/studio-local
 dotnet build plugin/RoundTableStudio -c Release -p:DebugType=None -p:DebugSymbols=false -p:IncludeSourceRevisionInInformationalVersion=false
 ```
 
+## 自行构建蓝扇采集器与 AE 整理器
+
+Windows 程序包已经带有这两项。要从同标签源码重建，需在 x64 Visual Studio C++ 环境中，用 Windows SDK 和 ReShade 6.8.0 SDK 编译采集器与 D3D11 回放器，再用 64 位 Python 3.11 打包 AE 整理器。编译完成后，采集器放入 ReShade 扩展搜索目录，整个 `FanExport` 放在绿幕 DLL 旁，回放器放在 `FanExport` 内。具体命令、固定的 Python 依赖版本、离线测试和 ReShade 配置见[蓝扇采集器构建与设置](../tools/graphics/draw_probe/README.md)。
+
 ## 基本验证
 
-以下四组 .NET 检查和一次 PowerShell 离线导出检查使用测试数据，可在游戏关闭时执行。它们覆盖棚内状态恢复、透明图计算、角色技能单帧和导出流程。需实际画面判断的颜色、粒子或骨架问题，请按游戏内清单测试。[游戏内复核](studio-plugin.md#实机复核)
+以下五组 .NET 检查和一组 PowerShell 检查可在游戏关闭时执行。蓝扇检查需使用 Windows x64，它验证录制请求、时间限制、取消、整理器重试和结果匹配。测试数据适合核对流程，实际机位、画面和施放时机请在游戏中复核。需实际画面判断的颜色、粒子或骨架问题，请按游戏内清单测试。[游戏内复核](studio-plugin.md#实机复核)
 
 ```powershell
 dotnet run --project plugin/checks/CaptureChecks.csproj -c Release
 dotnet run --project plugin/matte-checks/MatteChecks.csproj -c Release
 dotnet run --project plugin/skill-checks/SkillChecks.csproj -c Release
 dotnet run --project plugin/export-flow-checks/ExportFlowChecks.csproj -c Release
+dotnet run --project plugin/fan-sequence-checks/FanSequenceChecks.csproj -c Release
 powershell.exe -NoProfile -File ./tools/checks/Test-AlphaExport.ps1
 ```
 

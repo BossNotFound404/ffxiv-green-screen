@@ -4,6 +4,7 @@ string root = Path.Combine(Path.GetTempPath(), "GreenScreenFlowChecks-" + Guid.N
 try
 {
     Plugin.CheckComplete(Path.Combine(root, "complete"));
+    Plugin.CheckComplete(Path.Combine(root, "from-gray"), initial: 44);
     Plugin.CheckPlayerSkill(Path.Combine(root, "natural-skill"), cancel: false);
     Plugin.CheckPlayerSkill(Path.Combine(root, "waiting-skill"), cancel: true);
     Plugin.CheckCancel(Path.Combine(root, "cancel"));
@@ -69,17 +70,20 @@ namespace RoundTableStudio
             Check(until(), "workflow made progress. Notice was " + exportNotice);
         }
 
-        internal static void CheckComplete(string path)
+        internal static void CheckComplete(string path, byte initial = 45)
         {
             var plugin = new Plugin(path, hudVisible: true);
+            Stage.Color = initial;
+            plugin.config.Pending.SupportsMidGray = initial == 44;
             plugin.Start();
             Check(!StudioHudScope.Visible && plugin.pi.UiBuilder.DisableUserUiHide && plugin.exportOpacity.Value == 0
                 && plugin.previewFreeze.Frozen && plugin.previewFreeze.Speed == 0, "freeze and hide");
             plugin.Start(); // A double-click must not start a second job or overwrite the snapshot.
             plugin.RunUntil(() => plugin.export == null);
-            Check(plugin.switches.SequenceEqual(new byte[] { 47, 46, 48, 47, 46, 45 }), "five exposures and original red restored");
+            Check(plugin.switches.SequenceEqual(new byte[] { 47, 46, 48, 47, 46, initial }),
+                "five exposures and original studio color restored");
             Check(plugin.frameReader.Reads == 20, "transition resets count and each exposure requires another stable pair");
-            plugin.CheckRestored(true, 1.25);
+            plugin.CheckRestored(true, 1.25, initial);
             Check(plugin.exportDirectory != null && Directory.GetDirectories(Path.Combine(path, "Exports")).Length == 1,
                 "exactly one export from the button");
             string[] files = ["black.png","white.png","green.png","black-repeat.png","white-repeat.png","black-hold.png","white-hold.png","effect.png","green-recomposed.png","report.json"];
@@ -187,8 +191,8 @@ namespace RoundTableStudio
             plugin.CheckRestored(false, 1.25);
         }
 
-        private void CheckRestored(bool previousHud, double speed) =>
-            Check(export == null && Stage.Color == 45 && exportOpacity.Value == 0.37f && StudioHudScope.Visible == previousHud
+        private void CheckRestored(bool previousHud, double speed, byte initial = 45) =>
+            Check(export == null && Stage.Color == initial && exportOpacity.Value == 0.37f && StudioHudScope.Visible == previousHud
                 && pi.UiBuilder.DisableUserUiHide == !previousHud && !previewFreeze.Frozen && previewFreeze.Speed == speed,
                 "original scene, model alpha, HUD state, UI hide preference and preview speed restored");
 

@@ -46,12 +46,18 @@ def verify_native_lamp_example(read):
 def add_neutral_lamp_track(data, weather):
     if hashlib.sha256(data).hexdigest() != SOURCE_HASHES.get(weather):
         raise ValueError("Expected the matching v0.15 active stage-lamp table.")
+    return set_visible_lamp_gain(data, weather, STUDIO_GAIN, was_visible=True)
+
+
+def set_visible_lamp_gain(data, weather, gain, *, was_visible):
+    """Activate the weather's group while setting its light channel independently."""
     rows = list(_rows(data))
     ((_, start, _, _, footer),) = (row for row in rows if row[3] == weather)
     old = data[start:footer]
     assert len(old) == 24 and struct.unpack_from("<4I", old) == (12, 1, 29, 4)
-    assert old[22:] == bytes((1, 0))
-    mixed = _mixed_row(old[16:], (255, 255, 255), STUDIO_GAIN)
+    assert old[22:] == bytes((int(was_visible), 0))
+    visible_key = old[16:22] + bytes((1, 0))
+    mixed = _mixed_row(visible_key, (255, 255, 255), gain)
     result = bytearray(data[:start] + mixed + data[footer:])
     growth = len(mixed) - len(old)
     old_strings = len(data) - 13
