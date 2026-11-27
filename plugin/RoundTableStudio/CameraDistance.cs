@@ -157,7 +157,7 @@ internal sealed unsafe class CameraDistance
             PitchEnabled = false;
     }
 
-    private void Forget()
+    internal void Forget()
     {
         owner = 0;
         Enabled = false;

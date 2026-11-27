@@ -5,7 +5,8 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
-    <Version>0.9.0</Version>
+    <Version>0.9.1</Version>
+    <DefineConstants Condition="'$(EnableHyperboreaLocalMaps)' == 'true'">$(DefineConstants);HYPERBOREA_LOCAL_MAPS</DefineConstants>
     <DalamudLibPath Condition="'$(DalamudLibPath)' == ''">$(AppData)\XIVLauncher\addon\Hooks\dev</DalamudLibPath>
   </PropertyGroup>
   <ItemGroup>

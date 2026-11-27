@@ -8,6 +8,7 @@ internal sealed class NameplateVisibility(INamePlateGui plates, IObjectTable obj
     // NamePlateObjectIntArrayData.VisibilityFlags, FFXIVClientStructs.
     private const int DrawNameText = 1;
     private ulong owner;
+    private Func<bool>? canMask;
     private int maskedEntry = -1;
     private ulong maskedObject;
     private int originalNameFlag;
@@ -15,7 +16,7 @@ internal sealed class NameplateVisibility(INamePlateGui plates, IObjectTable obj
 
     internal bool Hidden => owner != 0;
 
-    internal void Hide(ulong contentId)
+    internal void Hide(ulong contentId, Func<bool>? canMask = null)
     {
         if (contentId == 0 || !player.IsLoaded || player.ContentId != contentId
             || objects.LocalPlayer is not { GameObjectId: not (0 or 0xE0000000) })
@@ -29,6 +30,7 @@ internal sealed class NameplateVisibility(INamePlateGui plates, IObjectTable obj
             plates.OnPostDataUpdate += OnPostDataUpdate;
         }
         owner = contentId;
+        this.canMask = canMask;
         plates.RequestRedraw();
     }
 
@@ -39,6 +41,7 @@ internal sealed class NameplateVisibility(INamePlateGui plates, IObjectTable obj
         if (!Hidden)
             return;
         owner = 0;
+        canMask = null;
         plates.OnDataUpdate -= OnDataUpdate;
         plates.OnPostDataUpdate -= OnPostDataUpdate;
         maskedEntry = -1;
@@ -50,6 +53,7 @@ internal sealed class NameplateVisibility(INamePlateGui plates, IObjectTable obj
     {
         maskedEntry = -1;
         if (owner == 0 || !player.IsLoaded || player.ContentId != owner
+            || canMask?.Invoke() == false
             || objects.LocalPlayer is not { GameObjectId: not (0 or 0xE0000000) } local)
             return;
         var id = local.GameObjectId;

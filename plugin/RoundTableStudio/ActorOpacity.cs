@@ -95,6 +95,8 @@ internal sealed unsafe class ActorOpacity(IObjectTable objects)
 
     private static bool ValidAlpha(float value) => float.IsFinite(value) && value is >= 0 and <= 1;
 
+    internal void Forget() => Clear();
+
     private void Clear()
     {
         ownerContent = 0;

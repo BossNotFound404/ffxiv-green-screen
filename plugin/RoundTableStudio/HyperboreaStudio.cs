@@ -19,6 +19,7 @@ internal sealed class HyperboreaStudio(IDalamudPluginInterface pi, IObjectTable 
     private const string Incompatible = "当前 Hyperborea 版本未适配，请使用它的 Load Zone 或 Revert。";
 
     private (uint Inn, ulong Character)? entered;
+    private WeakReference<Assembly>? hostAssembly;
     private WeakReference<object>? originRecord;
     private Vector3? arrivalPosition;
 
@@ -123,6 +124,61 @@ internal sealed class HyperboreaStudio(IDalamudPluginInterface pi, IObjectTable 
     public int? OriginIdentity => originRecord != null && originRecord.TryGetTarget(out var origin)
         ? RuntimeHelpers.GetHashCode(origin) : null;
 
+    internal sealed class LocalMap(uint inn, object plugin, object origin)
+    {
+        private readonly WeakReference<object> pluginIdentity = new(plugin);
+        private readonly WeakReference<object> originIdentity = new(origin);
+        internal uint Inn { get; } = inn;
+
+        internal bool Matches(object plugin, object origin) =>
+            pluginIdentity.TryGetTarget(out var owner) && ReferenceEquals(owner, plugin)
+            && originIdentity.TryGetTarget(out var saved) && ReferenceEquals(saved, origin);
+    }
+
+    public LocalMap? DetectLocalMap(uint layout, LocalMap? previous = null)
+    {
+        // Load Zone updates Dalamud's territory, so comparison with it alone does
+        // not establish ownership. The host also needs its original inn record.
+        if (layout is 0 or Stage.Territory || client.TerritoryType != layout) return null;
+        try
+        {
+            var host = Resolve();
+            var origin = host.SavedZone.GetValue(null);
+            if (origin == null || Field(origin.GetType(), "ZoneId").GetValue(origin) is not uint inn
+                || inn is 0 or Stage.Territory || inn == layout)
+                return null;
+            return previous?.Matches(host.Instance, origin) == true ? previous : new(inn, host.Instance, origin);
+        }
+        catch (InvalidOperationException) { return null; }
+        catch (TargetInvocationException) { return null; }
+    }
+
+    public void MoveWithinLocalMap(LocalMap map, uint territory, nint layout, Vector3 target)
+    {
+        RequireLocalMap(map, territory, layout);
+        MoveLocalActor(target);
+    }
+
+    public void ReturnFromLocalMap(LocalMap map, uint territory, nint layout)
+    {
+        var host = RequireLocalMap(map, territory, layout);
+        Method(host.Utils, "Revert").Invoke(null, null);
+    }
+
+    private Host RequireLocalMap(LocalMap map, uint territory, nint layout)
+    {
+        RequireOrdinaryView();
+        if (territory is 0 or Stage.Territory || client.TerritoryType != territory
+            || Stage.LoadedLayout() != (territory, layout))
+            throw new InvalidOperationException("本地地图已更换，请等载入完成后重试。");
+        var host = Resolve();
+        var origin = host.SavedZone.GetValue(null);
+        if (origin == null || !map.Matches(host.Instance, origin)
+            || Field(origin.GetType(), "ZoneId").GetValue(origin) is not uint inn || inn != map.Inn || inn == territory)
+            throw new InvalidOperationException("Hyperborea 的原旅馆记录已更换，请在原面板确认。");
+        return host;
+    }
+
     public void CompleteArrival(uint inn, ulong character)
     {
         if (arrivalPosition is not { } target) return;
@@ -130,23 +186,36 @@ internal sealed class HyperboreaStudio(IDalamudPluginInterface pi, IObjectTable 
         arrivalPosition = null;
     }
 
-    public unsafe void MoveWithinStudio(uint inn, ulong character, Vector3 target)
+    public void MoveWithinStudio(uint inn, ulong character, Vector3 target)
     {
         if (!Finite(target)) throw InvalidPosition();
         if (entered != (inn, character) || !player.IsLoaded || player.ContentId != character)
             throw new InvalidOperationException("原地调整站位需要由录制棚从本角色的旅馆进棚。");
         InStudio(inn);
+        MoveLocalActor(target);
+    }
+
+    private unsafe void MoveLocalActor(Vector3 target)
+    {
+        if (!Finite(target)) throw InvalidPosition();
         var actor = objects.LocalPlayer;
         if (actor == null || actor.Address == 0) throw new InvalidOperationException("棚内角色尚未载入。");
         // The same actor operation as the Hyperborea Compass position button.
         ((StudioActor*)actor.Address)->SetPosition(target.X, target.Y, target.Z);
     }
 
-    public void Return(uint inn)
+    public bool MatchesStudio(uint inn, int? expectedOrigin)
+    {
+        try { InStudio(inn, expectedOrigin, requireOrdinaryView: false); return true; }
+        catch (InvalidOperationException) { return false; }
+        catch (TargetInvocationException) { return false; }
+    }
+
+    public void Return(uint inn, int? expectedOrigin = null)
     {
         try
         {
-            var host = InStudio(inn);
+            var host = InStudio(inn, expectedOrigin);
             Method(host.Utils, "Revert").Invoke(null, null);
         }
         catch (Exception e)
@@ -158,15 +227,17 @@ internal sealed class HyperboreaStudio(IDalamudPluginInterface pi, IObjectTable 
 
     public void Forget() { entered = null; originRecord = null; arrivalPosition = null; }
 
-    private Host InStudio(uint inn)
+    private Host InStudio(uint inn, int? expectedOrigin = null, bool requireOrdinaryView = true)
     {
-        RequireOrdinaryView();
+        if (requireOrdinaryView) RequireOrdinaryView();
         if (inn is 0 or Stage.Territory || Stage.LoadedTerritory() != Stage.Territory)
             throw new InvalidOperationException("请等本地 448 摄影棚载入完成。");
         var host = Resolve();
         var origin = host.SavedZone.GetValue(null);
         if (origin == null || (uint)Field(origin.GetType(), "ZoneId").GetValue(origin)! != inn)
             throw new InvalidOperationException("Hyperborea 的返程记录与本次旅馆不符，请使用原面板确认。");
+        if (expectedOrigin is int identity && RuntimeHelpers.GetHashCode(origin) != identity)
+            throw new InvalidOperationException("Hyperborea 的返程记录已经更换，请使用原面板确认。");
         if (originRecord != null && (!originRecord.TryGetTarget(out var owned) || !ReferenceEquals(origin, owned)))
             throw new InvalidOperationException("Hyperborea 的会话已更换，请使用原面板确认返程地点。");
         return host;
@@ -192,21 +263,28 @@ internal sealed class HyperboreaStudio(IDalamudPluginInterface pi, IObjectTable 
 
     private Host FindHost()
     {
+        if (hostAssembly != null && hostAssembly.TryGetTarget(out var known) && GetHost(known) is { } active)
+            return active;
         foreach (var assembly in AppDomain.CurrentDomain.GetAssemblies())
         {
-            if (assembly.GetName().Name != "Hyperborea") continue;
-            var owner = pi.GetPlugin(assembly);
-            if (owner is not { InternalName: "Hyperborea", IsLoaded: true }) continue;
-            if (assembly.ManifestModule.ModuleVersionId != SupportedModule) continue;
-            var main = assembly.GetType("Hyperborea.Hyperborea", true)!;
-            var plugin = Field(main, "P").GetValue(null);
-            if (plugin == null || !(bool)Field(main, "AllowedOperation").GetValue(plugin)!)
-                throw new InvalidOperationException("Hyperborea 尚未就绪，请检查其原面板状态。");
-            if ((bool)Field(main, "Bypass").GetValue(plugin)!)
-                throw new InvalidOperationException("请在 Hyperborea 关闭调试限制绕过选项，再使用录制棚。");
-            return new Host(assembly, plugin);
+            if (assembly.GetName().Name != "Hyperborea" || assembly.ManifestModule.ModuleVersionId != SupportedModule) continue;
+            if (GetHost(assembly) is not { } host) continue;
+            hostAssembly = new(assembly);
+            return host;
         }
         throw new InvalidOperationException("未找到已加载的适配版 Hyperborea 1.0.1.2，请检查插件安装或使用原面板。");
+    }
+
+    private Host? GetHost(Assembly assembly)
+    {
+        if (pi.GetPlugin(assembly) is not { InternalName: "Hyperborea", IsLoaded: true }) return null;
+        var main = assembly.GetType("Hyperborea.Hyperborea", true)!;
+        var plugin = Field(main, "P").GetValue(null);
+        if (plugin == null || !(bool)Field(main, "AllowedOperation").GetValue(plugin)!)
+            throw new InvalidOperationException("Hyperborea 尚未就绪，请检查其原面板状态。");
+        if ((bool)Field(main, "Bypass").GetValue(plugin)!)
+            throw new InvalidOperationException("请在 Hyperborea 关闭调试限制绕过选项，再使用录制棚。");
+        return new Host(assembly, plugin);
     }
 
     private static bool Finite(Vector3 v) => float.IsFinite(v.X) && float.IsFinite(v.Y) && float.IsFinite(v.Z);
@@ -220,6 +298,7 @@ internal sealed class HyperboreaStudio(IDalamudPluginInterface pi, IObjectTable 
 
     private sealed class Host(Assembly assembly, object plugin)
     {
+        public object Instance => plugin;
         public bool Enabled => (bool)Field(plugin.GetType(), "Enabled").GetValue(plugin)!;
         public int Identity => RuntimeHelpers.GetHashCode(plugin);
         public int? OriginIdentity => SavedZone.GetValue(null) is { } origin ? RuntimeHelpers.GetHashCode(origin) : null;

@@ -71,6 +71,7 @@ public sealed partial class Plugin : IDalamudPlugin
     private long verifyUntil;
     private long nextTick;
     private bool showColors;
+    private bool showShooting;
     private byte? selectedColor;
     private string cameraNotice = "";
     private uint? shownLight;
@@ -117,6 +118,7 @@ public sealed partial class Plugin : IDalamudPlugin
             {
                 recovery.EntryRequestedAt = 0;
                 recovery.HyperOwner = recovery.HyperOrigin = null;
+                recovery.StudioLayout = 0;
                 recovery.Original = recovery.Last = null;
                 recovery.PriorFade = null;
                 recovery.MutedAmbient = false;
@@ -127,6 +129,9 @@ public sealed partial class Plugin : IDalamudPlugin
         }
         commands.AddHandler("/rtstudio", new CommandInfo((_, argument) => StudioCommand(argument.Trim()))
             { HelpMessage = "打开 Green Screen / 绿幕。可加 进棚、退棚 或 黑、红、绿、蓝、白、中灰。" });
+        recorderSceneUsage = pi.GetIpcSubscriber<bool>("VfxRecorder.IsUsingScene");
+        studioTransition = pi.GetIpcProvider<bool>("RoundTableStudio.IsTransitioning");
+        studioTransition.RegisterFunc(IsStudioTransitioning);
         pi.UiBuilder.Draw += Draw;
         pi.UiBuilder.OpenMainUi += Show;
         framework.Update += Tick;
@@ -139,13 +144,24 @@ public sealed partial class Plugin : IDalamudPlugin
     {
         if (argument.Length == 0) { Show(); return; }
         if (argument == "取消导出") { FromPanel(() => StopExport("已取消透明导出。")); return; }
+        if (LocalMapsEnabled && argument == "截帧")
+        {
+            FromPanel(() =>
+            {
+                if (localMap is not { } capture)
+                    throw new InvalidOperationException("请先在 Hyperborea 中载入本地地图。");
+                TakeLocalMapFrame(capture);
+            });
+            return;
+        }
         if (argument == "进棚") { Show(); FromPanel(Begin); return; }
         if (argument == "退棚")
         {
             Show();
             FromPanel(() =>
             {
-                if (config.Pending is { } run) End(run);
+                if (localMap is { } capture) ReturnFromLocalMap(capture);
+                else if (config.Pending is { } run) End(run);
                 else if (import.HasValue) { import = null; status = "已取消本次进棚。"; }
             });
             return;
@@ -155,6 +171,7 @@ public sealed partial class Plugin : IDalamudPlugin
             if (argument != name) continue;
             FromPanel(() =>
             {
+                if (localMap != null) throw new InvalidOperationException(LocalMapColorsUnavailable);
                 if (config.Pending is not { } run)
                     throw new InvalidOperationException("请先在旅馆准备进棚。");
                 Color(run, id);
@@ -174,9 +191,12 @@ public sealed partial class Plugin : IDalamudPlugin
 
     private void Begin()
     {
+        RequireSceneAvailable();
         var inn = Layout;
         var character = Character;
         if (config.Pending != null || import.HasValue) return;
+        if (LocalMapsEnabled && travel.DetectLocalMap(inn) != null)
+            throw new InvalidOperationException("请在 Hyperborea 中点 Revert 回到原旅馆，再进入 448 摄影棚。");
         if (client.IsGPosing || InDuty || ChangingArea || character == 0 || client.TerritoryType != inn || !IsInn(inn))
             throw new InvalidOperationException("请先返回实际旅馆，等载入完成后再进棚。");
         var installed = shelf.Find();
@@ -280,7 +300,7 @@ public sealed partial class Plugin : IDalamudPlugin
             throw;
         }
         journey = Journey.Entering;
-        if (run.HyperOwner.HasValue)
+        if (LocalMapsEnabled || run.HyperOwner.HasValue)
         {
             run.HyperOrigin = travel.OriginIdentity;
             Save();
@@ -291,9 +311,9 @@ public sealed partial class Plugin : IDalamudPlugin
 
     private void ReturnToInn(Capture run)
     {
-        if (Layout != Stage.Territory || run.Character != Character || InDuty || client.IsGPosing || ChangingArea) return;
+        if (!OwnsStudioLayout(run) || InDuty || client.IsGPosing || ChangingArea) return;
         journey = Journey.ReturnHelp;
-        travel.Return(run.Inn);
+        travel.Return(run.Inn, LocalMapsEnabled ? run.HyperOrigin : null);
         journey = Journey.Returning;
         travelDeadline = Environment.TickCount64 + 30000;
         run.SeenStudio = true;
@@ -304,6 +324,7 @@ public sealed partial class Plugin : IDalamudPlugin
 
     private void RetryEntry(Capture run)
     {
+        RequireSceneAvailable();
         if (journey != Journey.EntryHelp || !ReferenceEquals(config.Pending, run) || run.SeenStudio || run.Closing
             || Layout != run.Inn || client.TerritoryType != run.Inn || Character != run.Character
             || ChangingArea || InDuty || client.IsGPosing) return;
@@ -313,7 +334,7 @@ public sealed partial class Plugin : IDalamudPlugin
 
     private bool Release(Capture run)
     {
-        RestoreShot();
+        if (localMap == null) RestoreShot();
         RestoreLight(run);
         if (!run.ShelfReleased)
         {
@@ -328,7 +349,7 @@ public sealed partial class Plugin : IDalamudPlugin
             if (disposed) return false;
             if (Layout != run.Inn || client.TerritoryType != run.Inn || Character == 0 || InDuty || ChangingArea || client.IsGPosing)
             {
-                status = "棚包已还原。回到原旅馆的普通视角后会恢复 Hyperborea 开关。";
+                if (localMap == null) status = "棚包已还原。回到原旅馆的普通视角后会恢复 Hyperborea 开关。";
                 return false;
             }
             if (journey == Journey.RestoreHelp)
@@ -395,15 +416,17 @@ public sealed partial class Plugin : IDalamudPlugin
 
     private void RestoreInStudio(Capture run)
     {
-        if (!InDuty && run.OriginalLamps.Count > 0 && Layout == Stage.Territory && Character == run.Character)
+        if (InDuty || !OwnsStudioLayout(run)) return;
+        if (LocalMapsEnabled && !CanRestoreStudioScene(run)) return;
+        if (run.OriginalLamps.Count > 0)
             run.RestoreLegacyLamps(Stage.LegacyLamps, Stage.ReadLegacyLamp, Stage.RestoreLegacyLamp, Save);
-        if (!InDuty && run.MutedAmbient && Layout == Stage.Territory && Character == run.Character)
+        if (run.MutedAmbient)
         {
             Stage.ToggleAmbient(true);
             run.MutedAmbient = false;
             Save();
         }
-        if (!InDuty && run.Last.HasValue && Layout == Stage.Territory && Character == run.Character)
+        if (run.Last.HasValue)
         {
             if (client.IsGPosing) throw new InvalidOperationException("请退出合影模式，恢复普通视角的天气。");
             var current = Stage.Target() ?? throw new InvalidOperationException("天气尚未就绪，稍后重试。");
@@ -414,10 +437,21 @@ public sealed partial class Plugin : IDalamudPlugin
         }
     }
 
+    private bool OwnsStudioLayout(Capture run)
+    {
+        if (!client.IsLoggedIn || Character != run.Character || Layout != Stage.Territory) return false;
+        return !LocalMapsEnabled || !run.ShelfReleased && run.ProcessStart == ProcessStart &&
+            (run.StudioLayout == 0 || run.StudioLayout == (long)Stage.LoadedLayout().Address);
+    }
+
+    private bool LostStudioLayout(Capture run, uint layout) => LocalMapsEnabled && !ChangingArea && Character != 0 && layout == Stage.Territory &&
+        (!OwnsStudioLayout(run) || !travel.MatchesStudio(run.Inn, run.HyperOrigin));
+
     private void End(Capture run)
     {
-        if (!ReferenceEquals(run, config.Pending)) return;
+        if (!ReferenceEquals(run, config.Pending) || localMap != null) return;
         if (journey == Journey.Returning || journey == Journey.Entering) return;
+        RequireSceneAvailable();
         StopExport("已结束本次透明导出。");
         if (targetModel.IsActive || targetModel.IsRedrawing)
         {
@@ -437,7 +471,7 @@ public sealed partial class Plugin : IDalamudPlugin
         Save();
         RestoreLight(run);
         RestoreInStudio(run);
-        if (run.ShouldRelease(Layout, Character))
+        if (run.ShouldRelease(Layout, Character) || LostStudioLayout(run, Layout))
         {
             if (Release(run)) status = "录制已结束，棚包已恢复到进棚前的设置。";
         }
@@ -447,7 +481,12 @@ public sealed partial class Plugin : IDalamudPlugin
     private void Tick(IFramework _)
     {
         if (disposed || framework.IsFrameworkUnloading) return;
-        if (targetModel.IsActive || targetModel.IsRedrawing) Act(() =>
+        if (LocalMapsEnabled)
+        {
+            Act(ObserveLocalMap);
+            PollLocalMapFrame();
+        }
+        if (!targetModel.HasReleasedPlayerModel && (targetModel.IsActive || targetModel.IsRedrawing)) Act(() =>
         {
             var notice = targetModel.Tick();
             if (notice != null) status = notice;
@@ -458,39 +497,42 @@ public sealed partial class Plugin : IDalamudPlugin
             if (ReferenceEquals(exiting, config.Pending)) Act(() => End(exiting));
         }
         TickExport();
-        PollFanSequence();
         if (export?.SceneReleased != false && exportOpacity.Active) exportOpacity.Observe(Character);
         if (switchRequested is bool switching && Environment.TickCount64 >= switchDeadline)
             SwitchFailed(switching, new InvalidOperationException("Hyperborea 开关操作超时。"));
         if (opacity.Active || camera.HasChanges || nameplate.Hidden || freecam.Owned || targetModel.IsActive) Act(ObserveShot);
-        if ((config.Pending == null && import == null) || Environment.TickCount64 < nextTick) return;
-        nextTick = Environment.TickCount64 + (showColors && open ? 80 : 350);
+        if ((config.Pending == null && import == null && localMap == null) || Environment.TickCount64 < nextTick) return;
+        nextTick = Environment.TickCount64 + (showShooting && open ? 80 : 350);
         if (import.HasValue) { Act(WaitForImport); return; }
         Act(() =>
         {
-            var run = config.Pending!;
             var layout = Layout;
             var character = Character;
-            showColors = verified && run.CanShoot(layout, character) && !client.IsGPosing && !InDuty && !ChangingArea;
+            var run = config.Pending;
+            showColors = run != null && CanShootInStudio(run);
+            showShooting = showColors || localMap != null && !LocalMapReturning && !client.IsGPosing;
             selectedColor = showColors ? Stage.Target() : null;
-            shownLight = showColors && gameConfig.TryGet(SystemConfigOption.CharaLight, out uint value) ? value : null;
-            shownFreecam = showColors ? freecam.Read() : null;
-            shownCamera = showColors && shownFreecam != true ? CameraDistance.Read() : null;
-            shownOpacity = showColors ? opacity.Read(character) : null;
-            shownPosition = showColors ? objects.LocalPlayer?.Position : null;
-            shownTarget = showColors ? targetModel.CurrentTargetName : null;
+            shownLight = showShooting && gameConfig.TryGet(SystemConfigOption.CharaLight, out uint value) ? value : null;
+            shownFreecam = showShooting ? freecam.Read() : null;
+            shownCamera = showShooting && shownFreecam != true ? CameraDistance.Read() : null;
+            shownOpacity = showShooting ? opacity.Read(character) : null;
+            shownPosition = showShooting ? objects.LocalPlayer?.Position : null;
+            shownTarget = showShooting ? targetModel.CurrentTargetName : null;
+            if (showShooting && localMap != null) ApplyCameraSettings();
+            if (run == null) return;
             if (journey == Journey.Entering && layout == Stage.Territory) journey = Journey.Ready;
             if (journey is Journey.Entering or Journey.Returning && Environment.TickCount64 >= travelDeadline)
             {
                 journey = journey == Journey.Entering ? Journey.EntryHelp : Journey.ReturnHelp;
                 status = "暂未读到目标场景。载入完成后可重试，或打开 Hyperborea。";
             }
-            if (!client.IsLoggedIn || InDuty || run.ShouldRelease(layout, character))
+            if (!client.IsLoggedIn || InDuty || run.ShouldRelease(layout, character) || LostStudioLayout(run, layout))
             {
                 if (client.IsLoggedIn && !InDuty && run.Closing && character == run.Character
                     && run.AwaitingArrival(layout, Environment.TickCount64)) return;
                 bool returned = run.SeenStudio && layout == run.Inn && character == run.Character && !InDuty;
                 if (!Release(run)) return;
+                if (localMap != null) return;
                 if (returned) status = "已回到原旅馆，本次拍摄设置已还原。";
                 else if (!status.Contains("失败") && !status.Contains("未指向"))
                     status = "本次进棚已结束，已撤销录制棚的临时设置。";
@@ -515,10 +557,12 @@ public sealed partial class Plugin : IDalamudPlugin
                 }
                 if (journey == Journey.Ready) { EnterStudio(run); return; }
             }
-            if (!run.SeenStudio && layout == Stage.Territory && character == run.Character)
+            if (!run.SeenStudio && layout == Stage.Territory && character == run.Character &&
+                (!LocalMapsEnabled || !ChangingArea && !client.IsGPosing && travel.MatchesStudio(run.Inn, run.HyperOrigin)))
             {
                 shelf.Verify(run.Mod, run.SupportsMidGray);
                 run.SeenStudio = true;
+                if (LocalMapsEnabled) run.StudioLayout = (long)Stage.LoadedLayout().Address;
                 journey = Journey.Ready;
                 positionOnEntry = config.UseSpawn;
                 positionDeadline = Environment.TickCount64 + 15000;
@@ -548,6 +592,16 @@ public sealed partial class Plugin : IDalamudPlugin
             var color = run.SupportsColor(config.LastColor) ? config.LastColor : (byte)47;
             Act(() => Color(run, color, temporary: config.LastColor == 44 && !run.SupportsMidGray));
         }
+        ApplyCameraSettings();
+        if (positionOnEntry && (shownPosition.HasValue || Environment.TickCount64 >= positionDeadline))
+        {
+            positionOnEntry = false;
+            Act(() => travel.CompleteArrival(run.Inn, character));
+        }
+    }
+
+    private void ApplyCameraSettings()
+    {
         if (resumeExtendedRange && shownCamera.HasValue && shownFreecam != true)
         {
             resumeExtendedRange = false;
@@ -558,24 +612,40 @@ public sealed partial class Plugin : IDalamudPlugin
             setPitchOnEntry = false;
             Act(camera.EnablePitch);
         }
-        if (positionOnEntry && (shownPosition.HasValue || Environment.TickCount64 >= positionDeadline))
-        {
-            positionOnEntry = false;
-            Act(() => travel.CompleteArrival(run.Inn, character));
-        }
     }
+
+    private bool CanShootInStudio(Capture run) => !InDuty && !client.IsGPosing && !ChangingArea && verified
+        && run.CanShoot(Layout, Character) && (!LocalMapsEnabled ||
+            OwnsStudioLayout(run) && travel.MatchesStudio(run.Inn, run.HyperOrigin));
 
     private void RequireStudio(Capture run)
     {
-        if (!ReferenceEquals(run, config.Pending) || InDuty || client.IsGPosing || ChangingArea || !verified || !run.CanShoot(Layout, Character))
-            throw new InvalidOperationException("请在摄影棚的普通视角下操作。");
+        RequireSceneAvailable();
+        if (!ReferenceEquals(run, config.Pending) || !CanShootInStudio(run))
+            throw new InvalidOperationException(localMap != null ? LocalMapColorsUnavailable : "请在摄影棚的普通视角下操作。");
+    }
+
+    private bool CanShootInLocalMap(Capture run) => !client.IsGPosing && !LocalMapReturning && localMap is { } capture
+        && ReferenceEquals(capture.Run, run) && SameLocalMap(capture);
+
+    private void RequireShooting(Capture run)
+    {
+        if (ReferenceEquals(run, config.Pending)) RequireStudio(run);
+        else
+        {
+            RequireSceneAvailable();
+            if (!CanShootInLocalMap(run))
+                throw new InvalidOperationException("请等 Hyperborea 的本地地图和角色加载完成。");
+        }
     }
 
     private bool ChangingArea => condition[ConditionFlag.BetweenAreas] || condition[ConditionFlag.BetweenAreas51];
 
-    private bool CanControlCamera() => config.Pending is { SeenStudio: true } run && client.IsLoggedIn
-        && !InDuty && !ChangingArea && !client.IsGPosing && Character == run.Character
-        && (Layout == Stage.Territory || freecam.Owned && Layout == run.Inn && client.TerritoryType == run.Inn);
+    private bool CanControlCamera() => localMap is { } capture ? CanShootInLocalMap(capture.Run)
+        : config.Pending is { SeenStudio: true } run && client.IsLoggedIn
+            && !InDuty && !ChangingArea && !client.IsGPosing && Character == run.Character
+            && (OwnsStudioLayout(run) && (!LocalMapsEnabled || travel.MatchesStudio(run.Inn, run.HyperOrigin))
+                || freecam.Owned && Layout == run.Inn && client.TerritoryType == run.Inn);
 
     private void ObserveShot()
     {
@@ -583,8 +653,8 @@ public sealed partial class Plugin : IDalamudPlugin
         if (client.IsGPosing && config.Pending is { Closing: false, SeenStudio: true } session
             && character == session.Character && Layout == Stage.Territory)
             setPitchOnEntry = true;
-        if (config.Pending is not { } run || !verified || client.IsGPosing || InDuty || ChangingArea
-            || !client.IsLoggedIn || !run.CanShoot(Layout, character))
+        if (localMap is { } capture ? !CanShootInLocalMap(capture.Run)
+            : config.Pending is not { } run || !CanShootInStudio(run))
         {
             RestoreShot();
             return;
@@ -596,17 +666,35 @@ public sealed partial class Plugin : IDalamudPlugin
 
     private void RestoreShot()
     {
+        if (LocalMapsEnabled)
+        {
+            var owner = localMap is { } capture && !SameLocalMap(capture) ? capture.Run
+                : localMap == null && config.Pending is { SeenStudio: true } studio && !CanRestoreStudioScene(studio) ? studio : null;
+            if (owner != null)
+            {
+                ReleaseShotOwnership(owner.Character);
+                return;
+            }
+            if (releasedShotOwner != 0)
+            {
+                RestoreReleasedShot();
+                return;
+            }
+        }
         if (targetModel.IsActive) targetModel.Restore();
         nameplate.Restore();
         // Cammy may still hold the world camera while the player is loading or in GPose.
         // Wait for the same character's normal view before releasing an owned camera.
-        if (!freecam.Owned || config.Pending is not { } run || !client.IsLoggedIn || InDuty
+        if (!freecam.Owned || (localMap?.Run ?? config.Pending) is not { } run || !client.IsLoggedIn || InDuty
             || Character != 0 && Character != run.Character
             || !client.IsGPosing && !ChangingArea && Layout != 0 && Character != 0)
             freecam.Restore();
         opacity.Restore(Character);
         camera.Restore();
     }
+
+    private bool CanRestoreStudioScene(Capture run) => !ChangingArea && !InDuty
+        && OwnsStudioLayout(run) && travel.MatchesStudio(run.Inn, run.HyperOrigin);
 
     private void Color(Capture run, byte color, bool temporary = false)
     {
@@ -637,12 +725,12 @@ public sealed partial class Plugin : IDalamudPlugin
 
     private void SetLight(Capture run, uint? desired)
     {
-        RequireStudio(run);
+        RequireShooting(run);
         if (desired.HasValue)
         {
             if (!gameConfig.TryGet(SystemConfigOption.CharaLight, out uint current))
                 throw new InvalidOperationException("当前客户端无法读取角色照明。");
-            run.SetLight(current, desired.Value, Save, ApplyLight);
+            run.SetLight(current, desired.Value, ReferenceEquals(run, config.Pending) ? Save : () => { }, ApplyLight);
         }
         else RestoreLight(run);
         nextTick = 0;
@@ -656,7 +744,7 @@ public sealed partial class Plugin : IDalamudPlugin
         if (!gameConfig.TryGet(SystemConfigOption.CharaLight, out uint current))
             throw new InvalidOperationException("正在等待恢复角色照明。");
         run.RestoreLight(current, ApplyLight);
-        Save();
+        if (ReferenceEquals(run, config.Pending)) Save();
     }
 
     private void Act(Action action)
@@ -680,7 +768,7 @@ public sealed partial class Plugin : IDalamudPlugin
     {
         FromPanel(() =>
         {
-            RequireStudio(run);
+            RequireShooting(run);
             cameraNotice = "";
             if (freecam.Read() == true || !CameraDistance.Read().HasValue) return;
             try { change(); }
@@ -747,7 +835,7 @@ public sealed partial class Plugin : IDalamudPlugin
         if (ImGui.Button(enableFreecam ? "开启 Freecam" : "关闭 Freecam"))
             FromPanel(() =>
             {
-                RequireStudio(run);
+                RequireShooting(run);
                 if (enableFreecam && freecam.Read() == false)
                 {
                     // Cammy installs a separate preset. Return the world camera to
@@ -767,15 +855,20 @@ public sealed partial class Plugin : IDalamudPlugin
             ImGui.TextUnformatted($"当前角色透明度 {shownOpacity:0.00}");
             ImGui.SetNextItemWidth(110);
             ImGui.InputFloat("指定透明度", ref requestedOpacity, 0.01f, 0.1f, "%.2f");
-            if (ImGui.Button("设为 0.01")) FromPanel(() => { RequireStudio(run); opacity.Apply(Character); });
+            if (ImGui.Button("设为 0.01")) FromPanel(() => { RequireShooting(run); opacity.Apply(Character); });
             ImGui.SameLine();
-            if (ImGui.Button("应用透明度")) FromPanel(() => { RequireStudio(run); opacity.Apply(Character, requestedOpacity); });
+            if (ImGui.Button("应用透明度")) FromPanel(() => { RequireShooting(run); opacity.Apply(Character, requestedOpacity); });
             ImGui.SameLine();
-            if (ImGui.Button("还原透明度")) FromPanel(() => { RequireStudio(run); opacity.Restore(Character); });
+            if (ImGui.Button("还原透明度")) FromPanel(() => { RequireShooting(run); opacity.Restore(Character); });
         }
         var hidePlate = nameplate.Hidden;
         if (ImGui.Checkbox("隐藏本人头顶名牌", ref hidePlate))
-            FromPanel(() => { RequireStudio(run); if (hidePlate) nameplate.Hide(Character); else nameplate.Restore(); });
+            FromPanel(() =>
+            {
+                RequireShooting(run);
+                if (hidePlate) nameplate.Hide(Character, localMap != null ? () => CanShootInLocalMap(run) : null);
+                else nameplate.Restore();
+            });
         if (ImGui.IsItemHovered()) ImGui.SetTooltip("一起隐藏自己的角色名、称号和职业图标。");
         if (ImGui.TreeNode("替换目标模型"))
         {
@@ -794,13 +887,19 @@ public sealed partial class Plugin : IDalamudPlugin
             if (ImGui.Button("替换当前目标"))
             {
                 int id = requestedModel;
-                FromPanel(() => { RequireStudio(run); targetModel.Apply(id); nextTick = 0; });
+                FromPanel(() =>
+                {
+                    RequireShooting(run);
+                    targetModel.Apply(id, localMap != null);
+                    nextTick = 0;
+                });
             }
             ImGui.EndDisabled();
             if (targetModel.IsActive)
             {
                 ImGui.SameLine();
-                if (ImGui.Button("还原目标模型")) FromPanel(() => { targetModel.Restore(); nextTick = 0; });
+                if (ImGui.Button("还原目标模型"))
+                    FromPanel(() => { RequireShooting(run); targetModel.Restore(); nextTick = 0; });
                 ImGui.TextUnformatted("已替换　" + targetModel.OriginalTargetName);
             }
             ImGui.TreePop();
@@ -811,21 +910,26 @@ public sealed partial class Plugin : IDalamudPlugin
             ImGui.InputFloat3("目标 X / Y / Z", ref requestedPosition);
             if (ImGui.Button("调整站位")) FromPanel(() =>
             {
-                RequireStudio(run);
+                RequireShooting(run);
                 positionOnEntry = false;
-                travel.MoveWithinStudio(run.Inn, run.Character, requestedPosition);
-                status = "已应用棚内站位。";
+                if (localMap is { } capture)
+                    travel.MoveWithinLocalMap(capture.Host, capture.Territory, capture.Layout, requestedPosition);
+                else travel.MoveWithinStudio(run.Inn, run.Character, requestedPosition);
+                status = "已应用站位。";
             });
-            ImGui.SameLine();
-            if (ImGui.Button("记住当前站位")) FromPanel(() =>
+            if (localMap == null)
             {
-                RequireStudio(run);
-                if (objects.LocalPlayer is not { } actor) return;
-                entryPosition = requestedPosition = actor.Position;
-                config.UseSpawn = true;
-                SavePosition();
-                status = "下次进棚将回到这个站位。";
-            });
+                ImGui.SameLine();
+                if (ImGui.Button("记住当前站位")) FromPanel(() =>
+                {
+                    RequireStudio(run);
+                    if (objects.LocalPlayer is not { } actor) return;
+                    entryPosition = requestedPosition = actor.Position;
+                    config.UseSpawn = true;
+                    SavePosition();
+                    status = "下次进棚将回到这个站位。";
+                });
+            }
         }
         if (shownLight.HasValue && ImGui.TreeNode("游戏角色照明"))
         {
@@ -842,18 +946,25 @@ public sealed partial class Plugin : IDalamudPlugin
 
     private void Draw()
     {
+        if (LocalMapsEnabled) localMapViewport = ImGui.GetMainViewport().ID;
         DrawSwitch();
         if (!open) return;
         ImGui.SetNextWindowSize(new System.Numerics.Vector2(475, 0), ImGuiCond.FirstUseEver);
         if (ImGui.Begin("Green Screen / 绿幕###RoundTableStudio", ref open, ImGuiWindowFlags.AlwaysAutoResize))
         {
             ImGui.PushTextWrapPos(450);
+            DrawVfxEditorShortcut();
+            DrawRecorderShortcut();
             if (status.Length != 0)
             {
                 ImGui.TextWrapped(status);
                 ImGui.Separator();
             }
-            if (config.Pending is not { } run)
+            if (localMap is { } capture)
+            {
+                DrawLocalMap(capture);
+            }
+            else if (config.Pending is not { } run)
             {
                 if (import.HasValue)
                 {
@@ -861,14 +972,17 @@ public sealed partial class Plugin : IDalamudPlugin
                 }
                 else
                 {
+                    ImGui.BeginDisabled(RecorderUsingScene);
                     if (ImGui.Button("进入摄影棚")) FromPanel(Begin);
+                    ImGui.EndDisabled();
                     DrawEntrySettings();
                 }
             }
             else
             {
                 var ready = showColors && !run.Closing && run.SeenStudio && returnAfterModelRestore == null;
-                ImGui.BeginDisabled(!ready || export is { SceneReleased: false });
+                var recorderUsingScene = RecorderUsingScene;
+                ImGui.BeginDisabled(!ready || recorderUsingScene || export is { SceneReleased: false });
                 foreach (var (label, id) in Stage.Colors)
                 {
                     if (!run.SupportsColor(id)) continue;
@@ -878,10 +992,10 @@ public sealed partial class Plugin : IDalamudPlugin
                 ImGui.EndDisabled();
                 if (ready)
                 {
-                    ImGui.BeginDisabled(FanSequenceBusy);
+                    ImGui.BeginDisabled(recorderUsingScene);
                     DrawExport(run);
                     ImGui.EndDisabled();
-                    ImGui.BeginDisabled(export is { SceneReleased: false });
+                    ImGui.BeginDisabled(recorderUsingScene || export is { SceneReleased: false });
                     DrawShot(run);
                     ImGui.EndDisabled();
                 }
@@ -889,17 +1003,18 @@ public sealed partial class Plugin : IDalamudPlugin
                 {
                     if (journey == Journey.EntryHelp && !run.Closing)
                     {
+                        ImGui.BeginDisabled(recorderUsingScene);
                         if (ImGui.Button("继续进棚")) FromPanel(() => RetryEntry(run));
+                        ImGui.EndDisabled();
                         ImGui.SameLine();
                     }
                     if (ImGui.Button("打开 Hyperborea")) FromPanel(Hyper);
                     ImGui.SameLine();
                 }
-                ImGui.BeginDisabled(journey is Journey.Entering or Journey.Returning || switchRequested == false);
+                ImGui.BeginDisabled(recorderUsingScene || journey is Journey.Entering or Journey.Returning || switchRequested == false);
                 if (ImGui.Button(journey == Journey.RestoreHelp ? "重试还原" : run.Closing ? "重试退棚" : run.SeenStudio ? "退棚" : "取消进棚")) FromPanel(() => End(run));
                 ImGui.EndDisabled();
             }
-            DrawFanSequence();
             ImGui.PopTextWrapPos();
         }
         ImGui.End();
@@ -909,7 +1024,8 @@ public sealed partial class Plugin : IDalamudPlugin
     {
         if (disposed) return;
         disposed = true;
-        DisposeFanSequence();
+        if (localMapFrame is { } pendingFrame) CancelLocalMapFrame(pendingFrame);
+        studioTransition.UnregisterFunc();
         framework.Update -= Tick;
         pi.UiBuilder.Draw -= Draw;
         pi.UiBuilder.OpenMainUi -= Show;
@@ -945,6 +1061,7 @@ public sealed partial class Plugin : IDalamudPlugin
     {
         if (framework.IsFrameworkUnloading || !framework.IsInFrameworkUpdateThread) return;
         StopExport("已结束本次透明导出。");
+        if (localMap is { } capture) CloseLocalMap(capture, SameLocalMap(capture));
         targetModel.Dispose();
         RestoreShot();
         if (config.Pending is not { } run) return;
@@ -957,11 +1074,12 @@ public sealed partial class Plugin : IDalamudPlugin
                 return;
             }
             RestoreInStudio(run);
-            if (Layout == Stage.Territory && Character == run.Character && !InDuty)
+            if (OwnsStudioLayout(run) && !InDuty)
             {
                 if (client.IsGPosing || ChangingArea)
                     throw new InvalidOperationException("等待返回原旅馆。");
-                if (journey != Journey.Returning) travel.Return(run.Inn);
+                if (journey != Journey.Returning && (!LocalMapsEnabled || travel.MatchesStudio(run.Inn, run.HyperOrigin)))
+                    travel.Return(run.Inn, LocalMapsEnabled ? run.HyperOrigin : null);
                 // There will be no further framework ticks after unload. The saved
                 // journal lets the next load verify the actual return destination.
                 shelf.Release(run.Collection, run.Mod);

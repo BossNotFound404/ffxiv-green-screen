@@ -22,6 +22,7 @@ internal sealed unsafe class StudioTargetModel : IDisposable
     private bool detached;
     public bool IsActive => active != null;
     public bool IsRedrawing => pending != null;
+    public bool HasReleasedPlayerModel => active is { Released: true } && pending is not { Restoring: true };
     public string? OriginalTargetName => active?.Name;
     public string? CurrentTargetName => targets.Target is { } actor && actor.IsValid() ? actor.Name.TextValue : null;
 
@@ -35,10 +36,11 @@ internal sealed unsafe class StudioTargetModel : IDisposable
         redrawn.Subscribe(OnRedrawn);
     }
 
-    public void Apply(int modelId)
+    public void Apply(int modelId, bool localMap = false)
     {
-        if (Stage.LoadedTerritory() != Stage.Territory)
-            throw new InvalidOperationException("请先进摄影棚再更换目标模型。");
+        var layout = Stage.LoadedLayout();
+        if (layout.Territory == 0 || !localMap && layout.Territory != Stage.Territory)
+            throw new InvalidOperationException("请在本地拍摄场景中更换目标模型。");
         if (detached || pending != null) throw new InvalidOperationException("请等目标模型重绘完成。");
         if (targets.Target is not ICharacter selected || !selected.IsValid() ||
             selected.ObjectKind is not (ObjectKind.Pc or ObjectKind.BattleNpc or ObjectKind.EventNpc))
@@ -65,8 +67,8 @@ internal sealed unsafe class StudioTargetModel : IDisposable
         if (before == modelId) return;
         // Capture once for repeated changes on the same target. Zero is a valid original.
         var prior = active;
-        active = new(key, selected.Name.TextValue, prior?.Original ?? before, modelId,
-            localPlayer.GameObjectId);
+        active = new(key, selected.Name.TextValue, prior?.Original ?? before, modelId, localPlayer.GameObjectId,
+            localMap ? layout : null);
         try
         {
             Submit(actor, modelId, modelId == active.Original);
@@ -150,8 +152,42 @@ internal sealed unsafe class StudioTargetModel : IDisposable
         if (pending is { } draw && draw.Key.Index == index && draw.Key.Address == address) draw.Notified = true;
     }
 
-    private GameCharacter* OriginalActor(Change change) =>
-        objects.LocalPlayer?.GameObjectId == change.Player ? Resolve(change.Key) : null;
+    private GameCharacter* OriginalActor(Change change)
+    {
+        if (change.Released)
+            return objects.LocalPlayer is ICharacter local && Identity.Of(local) == change.Key ? Resolve(change.Key) : null;
+        if (change.Layout.HasValue && Stage.LoadedLayout() != change.Layout) return null;
+        return objects.LocalPlayer?.GameObjectId == change.Player ? Resolve(change.Key) : null;
+    }
+
+    internal void ForgetChange() => Clear();
+
+    internal void ReleaseLayout()
+    {
+        if (active is not { } change || change.Key.GameId != change.Player || pending is { Restoring: true })
+        {
+            Clear();
+            return;
+        }
+        // Only our own character can be kept across a layout reload. The actor's
+        // full identity is checked again before the saved model can be restored.
+        active = change with { Released = true };
+        pending = null;
+    }
+
+    internal void RestoreReleasedPlayerModel()
+    {
+        if (!HasReleasedPlayerModel || active is not { } change) return;
+        try { Restore(); }
+        catch
+        {
+            var actor = OriginalActor(change);
+            if (actor != null && actor->ModelContainer.ModelCharaId == change.Applied)
+                actor->ModelContainer.ModelCharaId = change.Original;
+            Clear();
+            throw;
+        }
+    }
 
     private void Clear() { pending = null; active = null; }
 
@@ -209,7 +245,8 @@ internal sealed unsafe class StudioTargetModel : IDisposable
         public volatile bool Notified;
     }
 
-    private sealed record Change(Identity Key, string Name, int Original, int Applied, ulong Player);
+    private sealed record Change(Identity Key, string Name, int Original, int Applied, ulong Player, (uint Territory, nint Address)? Layout,
+        bool Released = false);
     private readonly record struct Identity(ushort Index, ulong GameId, uint Entity, uint Base, ObjectKind Kind, nint Address)
     {
         public static Identity Of(ICharacter actor) =>

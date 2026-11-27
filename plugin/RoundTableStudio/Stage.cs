@@ -17,11 +17,13 @@ internal static unsafe class Stage
     public static readonly uint[] LegacyLamps =
         [5912930, 5909895, 5759859, 5912939, 5912803, 5939535, 5939539, 6068901];
 
-    public static uint LoadedTerritory()
+    public static uint LoadedTerritory() => LoadedLayout().Territory;
+
+    public static (uint Territory, nint Address) LoadedLayout()
     {
         var world = LayoutWorld.Instance();
         var layout = world == null ? null : world->ActiveLayout;
-        return layout != null && layout->InitState == 7 ? layout->TerritoryTypeId : 0;
+        return layout != null && layout->InitState == 7 ? (layout->TerritoryTypeId, (nint)layout) : default;
     }
 
     // Anamnesis uses the third local ServerWeather record in normal camera mode.
@@ -74,6 +76,7 @@ internal static unsafe class Stage
 
     public static void RestoreFade(float? prior)
     {
+        if (LoadedTerritory() != Territory) return;
         var env = EnvManager.Instance();
         if (prior.HasValue && env != null && env->TransitionTime == QuickFade)
             env->TransitionTime = prior.Value;

@@ -19,7 +19,7 @@ python build.py --studio --sqpack "D:\Games\FFXIV\game\sqpack"
 | `RoundTable_StableStage_v0.16.pmp` | 旧版五色稳定棚 | `6556cbdc8cff5793aef80e900ce53a273b77ec5252fafd746d71066120388bfe` |
 | `RoundTable_CaptureStage_v0.17.pmp` | 旧版五色渐变试验棚 | `5824fe4a956ae8de59ddc3df65950686c4573e6ab3716c1d7c6f9351d452903b` |
 
-这里列的是用 Windows Python 3.14.7 得到的整包校验值。另一种已核对的 ZIP 压缩结果有相同的包内文件，构建脚本和预览版插件也接受相应的整包校验值。[构建脚本](../build.py) · [插件认可的四组校验值](../plugin/RoundTableStudio/StagePackage.cs)
+这里列的是用 Windows Python 3.14.7 得到的整包校验值。另一种已核对的 ZIP 压缩结果有相同的包内文件，构建脚本和绿幕插件也接受相应的整包校验值。[构建脚本](../build.py) · [插件认可的四组校验值](../plugin/RoundTableStudio/StagePackage.cs)
 
 ## 编译插件
 
@@ -43,20 +43,15 @@ python build.py --studio --out output/studio-local
 dotnet build plugin/RoundTableStudio -c Release -p:DebugType=None -p:DebugSymbols=false -p:IncludeSourceRevisionInInformationalVersion=false
 ```
 
-## 自行构建蓝扇采集器与 AE 整理器
-
-Windows 程序包已经带有这两项。要从同标签源码重建，需在 x64 Visual Studio C++ 环境中，用 Windows SDK 和 ReShade 6.8.0 SDK 编译采集器与 D3D11 回放器，再用 64 位 Python 3.11 打包 AE 整理器。编译完成后，采集器放入 ReShade 扩展搜索目录，整个 `FanExport` 放在绿幕 DLL 旁，回放器放在 `FanExport` 内。具体命令、固定的 Python 依赖版本、离线测试和 ReShade 配置见[蓝扇采集器构建与设置](../tools/graphics/draw_probe/README.md)。
-
 ## 基本验证
 
-以下五组 .NET 检查和一组 PowerShell 检查可在游戏关闭时执行。蓝扇检查需使用 Windows x64，它验证录制请求、时间限制、取消、整理器重试和结果匹配。测试数据适合核对流程，实际机位、画面和施放时机请在游戏中复核。需实际画面判断的颜色、粒子或骨架问题，请按游戏内清单测试。[游戏内复核](studio-plugin.md#实机复核)
+以下四组 .NET 检查和一组 PowerShell 检查可在游戏关闭时执行。测试数据适合核对流程，实际机位、画面和施放时机请在游戏中复核。需实际画面判断的颜色、粒子或骨架问题，请按游戏内清单测试。[游戏内复核](studio-plugin.md#实机复核)
 
 ```powershell
 dotnet run --project plugin/checks/CaptureChecks.csproj -c Release
 dotnet run --project plugin/matte-checks/MatteChecks.csproj -c Release
 dotnet run --project plugin/skill-checks/SkillChecks.csproj -c Release
 dotnet run --project plugin/export-flow-checks/ExportFlowChecks.csproj -c Release
-dotnet run --project plugin/fan-sequence-checks/FanSequenceChecks.csproj -c Release
 powershell.exe -NoProfile -File ./tools/checks/Test-AlphaExport.ps1
 ```
 

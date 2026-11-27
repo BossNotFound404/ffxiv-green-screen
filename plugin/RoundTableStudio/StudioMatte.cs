@@ -249,6 +249,10 @@ internal static class StudioMatte
         return new(destination, false, visible, null, null, null, null, summary);
     }
 
+    internal static string ExportGameFrame(string parent, int width, int height, byte[] rgba, CancellationToken token) =>
+        WriteDirectory(parent, "game-frame-", token,
+            directory => SavePng(Path.Combine(directory, "frame.png"), width, height, rgba, false, token));
+
     private static string WriteDirectory(string parent, string prefix, CancellationToken token, Action<string> write)
     {
         token.ThrowIfCancellationRequested();

@@ -21,6 +21,7 @@ public sealed class Capture
     public ulong Character { get; set; }
     public long ProcessStart { get; set; }
     public bool SeenStudio { get; set; }
+    public long StudioLayout { get; set; }
     public long EntryRequestedAt { get; set; }
     public int? HyperOwner { get; set; }
     public int? HyperOrigin { get; set; }

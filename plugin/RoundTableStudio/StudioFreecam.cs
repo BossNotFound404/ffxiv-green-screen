@@ -43,7 +43,12 @@ internal sealed class StudioFreecam(IDalamudPluginInterface pi, ICommandManager 
 
     public void Set(bool requested)
     {
-        if (!canControl()) throw new InvalidOperationException("请在本次 448 录制棚的普通视角下使用自由镜头。");
+        if (!canControl()) throw new InvalidOperationException("请在当前拍摄场景的普通视角下使用自由镜头。");
+        Change(requested);
+    }
+
+    private void Change(bool requested)
+    {
         var current = Read() ?? throw new InvalidOperationException("未找到可读取状态的 Cammy 2.1.1.2。");
         if (current == requested) return;
         var before = registration;
@@ -59,13 +64,13 @@ internal sealed class StudioFreecam(IDalamudPluginInterface pi, ICommandManager 
         else Forget();
     }
 
-    public void Restore()
+    public void Restore(bool releaseOwned = false)
     {
-        if (Owned && canControl())
+        if (Owned && (releaseOwned || canControl()))
         {
             var current = Read();
             // A newly registered Cammy may already have its own camera.
-            if (Owned && current == true) Set(false);
+            if (Owned && current == true) Change(false);
         }
         Forget();
     }
